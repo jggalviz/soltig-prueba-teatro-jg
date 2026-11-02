@@ -67,6 +67,16 @@ $env:DB_PASS = "clave_segura"
 
 La conexión se abre con `PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION` y `charset=utf8mb4`.
 
+### Inicialización automática del esquema
+
+Justo después de conectar, `conexion.php` ejecuta dos `CREATE TABLE IF NOT EXISTS` (`obra` y `ventas`) y, si `obra` está vacía, inserta tres obras de ejemplo con fechas futuras. Así la aplicación funciona sobre una base recién creada (por ejemplo, `defaultdb` en Aiven) sin importar `schema.sql` a mano.
+
+- Es idempotente: si las tablas ya existen no se modifican, y los datos de prueba solo se cargan cuando `obra` no tiene registros.
+- `obra` se crea con las columnas del catálogo (`descripcion`, `precio`, `imagen`) y también con las que consultan las vistas (`fecha_obra`, `aforo`, `disponibles`, `sala`), por lo que `index.php` y `comprar.php` siguen funcionando sin cambios.
+- `ventas` se crea con `cod_venta`, `cod_obra`, `cantidad`, `total` y `fecha`, más `comprador` (que usa la vista de compra), y con la clave foránea `fk_ventas_obra` hacia `obra(cod_obra)`.
+- Las compras hechas desde `comprar.php` guardan `cantidad = 1` y `total = 0.00`, los valores por defecto, porque la vista no envía precio ni cantidad. Para que `total` refleje el precio del catálogo hay que calcularlo al registrar la venta (o con un trigger).
+- Si la creación falla (por ejemplo, un usuario MySQL sin permisos de DDL), el error queda en `error_log()` y la petición continúa con las tablas ya existentes.
+
 ## 3. Ejecutar la aplicación
 
 ### Servidor embebido de PHP
@@ -133,7 +143,7 @@ mysql -h <host> -P <puerto> -u <usuario> -p --default-character-set=utf8mb4 < sc
 1. Crear el servicio **MySQL** en Aiven y copiar su *Service URI* (`mysql://avnadmin:clave@mysql-xxxx.a.aivencloud.com:12345/defaultdb?ssl-mode=REQUIRED`).
 2. En Render, definir **solo** `DATABASE_URL` con esa URI: el host, el puerto, el usuario, la clave y la base (`defaultdb`) se extraen automáticamente.
 3. TLS: descargar el `ca.pem` desde la consola de Aiven (*Overview → CA certificate*) y guardarlo en la raíz del repositorio —`conexion.php` lo detecta solo y lo pasa como `PDO::MYSQL_ATTR_SSL_CA`—, o indicar su ruta con `DB_SSL_CA`. Si no se agrega, la conexión igual se cifra pero sin validar el certificado del servidor.
-4. Importar el esquema en `defaultdb` (Aiven no permite crear bases nuevas): usar una copia de `schema.sql` sin las sentencias `DROP DATABASE`, `CREATE DATABASE` y `USE`.
+4. Importar el esquema en `defaultdb` (Aiven no permite crear bases nuevas): usar una copia de `schema.sql` sin las sentencias `DROP DATABASE`, `CREATE DATABASE` y `USE`. **Este paso es opcional**: al abrir la aplicación, `conexion.php` crea las tablas y carga las obras de ejemplo automáticamente.
 
 ```bash
 grep -v -E '^(DROP DATABASE|CREATE DATABASE|USE )' schema.sql > schema_aiven.sql

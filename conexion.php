@@ -112,6 +112,121 @@ try {
     exit('No fue posible conectar con la base de datos. Verifique las variables de entorno DB_HOST, DB_PORT, DB_NAME, DB_USER y DB_PASS (o DATABASE_URL); con Aiven revise además el SSL (DB_SSL_CA / DB_SSL_MODE).');
 }
 
+// 6) Inicialización del esquema. Se ejecuta justo después de conectar para que
+//    la aplicación funcione sobre una base vacía (por ejemplo, el defaultdb de
+//    Aiven). Las tablas se crean con las columnas del catálogo (descripcion,
+//    precio, imagen, cantidad y total) y además con las que ya consultan
+//    index.php y comprar.php (fecha_obra, aforo, disponibles, sala y comprador),
+//    así las vistas siguen funcionando sin cambios.
+try {
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS obra (
+            cod_obra    INT AUTO_INCREMENT PRIMARY KEY,
+            nombre      VARCHAR(150) NOT NULL,
+            descripcion TEXT,
+            precio      DECIMAL(10,2) NOT NULL,
+            imagen      VARCHAR(255),
+            fecha_obra  DATETIME NOT NULL,
+            aforo       INT NOT NULL,
+            disponibles INT NOT NULL,
+            sala        VARCHAR(60) NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS ventas (
+            cod_venta INT AUTO_INCREMENT PRIMARY KEY,
+            cod_obra  INT NOT NULL,
+            cantidad  INT NOT NULL DEFAULT 1,
+            total     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            fecha     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            comprador VARCHAR(80) NOT NULL DEFAULT '',
+            INDEX idx_ventas_obra (cod_obra),
+            CONSTRAINT fk_ventas_obra FOREIGN KEY (cod_obra) REFERENCES obra (cod_obra)
+                ON UPDATE CASCADE
+                ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    // 7) Datos de prueba: solo se cargan si la cartelera está vacía.
+    if ((int) $pdo->query('SELECT COUNT(*) FROM obra')->fetchColumn() === 0) {
+        $semilla = [
+            [
+                'nombre'      => 'Sueño de una noche de verano',
+                'descripcion' => 'Comedia de William Shakespeare sobre el amor, la magia y los enredos de una noche en el bosque.',
+                'precio'      => 12.50,
+                'imagen'      => 'img/sueno-una-noche-de-verano.jpg',
+                'dias'        => 7,
+                'hora'        => 19,
+                'minutos'     => 30,
+                'aforo'       => 100,
+                'sala'        => 'Sala principal',
+            ],
+            [
+                'nombre'      => 'La casa de Bernarda Alba',
+                'descripcion' => 'Drama de Federico García Lorca sobre el luto, la autoridad y el deseo encerrado entre cuatro paredes.',
+                'precio'      => 10.00,
+                'imagen'      => 'img/la-casa-de-bernarda-alba.jpg',
+                'dias'        => 14,
+                'hora'        => 20,
+                'minutos'     => 0,
+                'aforo'       => 80,
+                'sala'        => 'Sala secundaria',
+            ],
+            [
+                'nombre'      => 'El Principito',
+                'descripcion' => 'Adaptación teatral del relato de Antoine de Saint-Exupéry, pensada para toda la familia.',
+                'precio'      => 8.00,
+                'imagen'      => 'img/el-principito.jpg',
+                'dias'        => 21,
+                'hora'        => 17,
+                'minutos'     => 0,
+                'aforo'       => 120,
+                'sala'        => 'Sala principal',
+            ],
+        ];
+
+        // Si la tabla viene del esquema anterior (sin descripcion/precio/imagen)
+        // se inserta solo con las columnas que existen.
+        $columnasObra   = $pdo->query('SHOW COLUMNS FROM obra')->fetchAll(PDO::FETCH_COLUMN);
+        $tieneCatalogo  = in_array('precio', $columnasObra, true) && in_array('descripcion', $columnasObra, true);
+
+        $insertar = $tieneCatalogo
+            ? $pdo->prepare('INSERT INTO obra (nombre, descripcion, precio, imagen, fecha_obra, aforo, disponibles, sala) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            : $pdo->prepare('INSERT INTO obra (nombre, fecha_obra, aforo, disponibles, sala) VALUES (?, ?, ?, ?, ?)');
+
+        foreach ($semilla as $fila) {
+            $fecha = new DateTime('+' . $fila['dias'] . ' days');
+            $fecha->setTime($fila['hora'], $fila['minutos']);
+            $fechaTexto = $fecha->format('Y-m-d H:i:s');
+
+            if ($tieneCatalogo) {
+                $insertar->execute([
+                    $fila['nombre'],
+                    $fila['descripcion'],
+                    $fila['precio'],
+                    $fila['imagen'],
+                    $fechaTexto,
+                    $fila['aforo'],
+                    $fila['aforo'],
+                    $fila['sala'],
+                ]);
+            } else {
+                $insertar->execute([
+                    $fila['nombre'],
+                    $fechaTexto,
+                    $fila['aforo'],
+                    $fila['aforo'],
+                    $fila['sala'],
+                ]);
+            }
+        }
+    }
+} catch (PDOException $error) {
+    // No se interrumpe la petición: si falla la creación, el error queda en el log.
+    error_log('conexion.php: no se pudo inicializar el esquema: ' . $error->getMessage());
+}
+
 function h(?string $valor): string
 {
     return htmlspecialchars((string) $valor, ENT_QUOTES, 'UTF-8');
