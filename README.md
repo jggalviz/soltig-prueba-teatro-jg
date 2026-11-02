@@ -36,6 +36,20 @@ El script crea la base `TEATRO`, las tablas `obra` y `ventas` (InnoDB, con clave
 
 También se puede entregar una sola URL de conexión, como las que generan varias plataformas: `DATABASE_URL` (o `MYSQL_URL`), con el formato `mysql://usuario:clave@host:3306/TEATRO`. El orden de prioridad es: variables `DB_*` (si tienen valor) → URL de conexión → valores por defecto de la tabla.
 
+### Conexiones con SSL (Aiven)
+
+Aiven entrega la URI de conexión con `?ssl-mode=REQUIRED`, por ejemplo `mysql://avnadmin:clave@mysql-xxxx.a.aivencloud.com:12345/defaultdb?ssl-mode=REQUIRED`, y exige TLS. `conexion.php` agrega dos variables para ese caso:
+
+| Variable      | Uso |
+|---------------|-----|
+| `DB_SSL_MODE` | `required` (cifra sin validar la CA), `verify_ca` o `verify_identity` (cifra y valida), `disabled` (sin TLS). Si no se define, se toma del `ssl-mode` de la URI. |
+| `DB_SSL_CA`   | Ruta al `ca.pem` descargado de la consola de Aiven; se pasa a PDO con `PDO::MYSQL_ATTR_SSL_CA`. Si no se define y existe `ca.pem` en la raíz del proyecto, se usa ese archivo. |
+
+- Con la URI de Aiven basta definir `DATABASE_URL`: el host, el puerto y la base (`defaultdb`) se extraen con `parse_url()`.
+- Usuario y clave se decodifican (`%40`, `%23`, `%2F`…), así que una contraseña con caracteres especiales funciona aunque venga escapada en la URI.
+- Sin `ca.pem` la conexión se cifra pero no valida el certificado del servidor (`PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false`); si se pidió `verify_ca`/`verify_identity` sin CA se deja constancia en el log.
+- En local no se envía ninguna opción SSL, por lo que el comportamiento es idéntico al de siempre.
+
 Opciones para ajustarla:
 
 - Editar los valores de respaldo directamente en `conexion.php`.
@@ -111,8 +125,23 @@ mysql -h <host> -P <puerto> -u <usuario> -p --default-character-set=utf8mb4 < sc
 
 > El parámetro `--default-character-set=utf8mb4` es obligatorio: sin él los acentos y la "ñ" se guardan corruptos.
 
-4. Definir las variables de entorno del servicio: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS` o, si el proveedor entrega una sola cadena, `DATABASE_URL`.
+4. Definir las variables de entorno del servicio: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS` o, si el proveedor entrega una sola cadena, `DATABASE_URL` (y `DB_SSL_MODE` / `DB_SSL_CA` si la base exige TLS).
 5. Probar la URL pública (`/index.php`) y, si la conexión falla, revisar los logs del servicio: `conexion.php` registra el error de PDO con `error_log()` sin mostrar credenciales al usuario.
+
+### Usar MySQL de Aiven como base de datos
+
+1. Crear el servicio **MySQL** en Aiven y copiar su *Service URI* (`mysql://avnadmin:clave@mysql-xxxx.a.aivencloud.com:12345/defaultdb?ssl-mode=REQUIRED`).
+2. En Render, definir **solo** `DATABASE_URL` con esa URI: el host, el puerto, el usuario, la clave y la base (`defaultdb`) se extraen automáticamente.
+3. TLS: descargar el `ca.pem` desde la consola de Aiven (*Overview → CA certificate*) y guardarlo en la raíz del repositorio —`conexion.php` lo detecta solo y lo pasa como `PDO::MYSQL_ATTR_SSL_CA`—, o indicar su ruta con `DB_SSL_CA`. Si no se agrega, la conexión igual se cifra pero sin validar el certificado del servidor.
+4. Importar el esquema en `defaultdb` (Aiven no permite crear bases nuevas): usar una copia de `schema.sql` sin las sentencias `DROP DATABASE`, `CREATE DATABASE` y `USE`.
+
+```bash
+grep -v -E '^(DROP DATABASE|CREATE DATABASE|USE )' schema.sql > schema_aiven.sql
+mysql -h <host> -P <puerto> -u avnadmin -p --default-character-set=utf8mb4 defaultdb < schema_aiven.sql
+```
+
+> `schema_aiven.sql` es un archivo temporal: no se versiona.
+
 
 ## Estructura del proyecto
 
@@ -123,6 +152,7 @@ index.php       Cartelera de funciones disponibles
 comprar.php     Formulario, registro de la venta y confirmación
 css/style.css   Estilos de la interfaz
 Dockerfile      Imagen php:8.2-apache para desplegar en la nube
+ca.pem          Opcional: certificado CA de Aiven para conexiones TLS
 README.md       Este documento
 ```
 
