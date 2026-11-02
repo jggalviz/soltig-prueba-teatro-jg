@@ -1,11 +1,42 @@
 <?php
 // Conexión PDO y utilidades comunes para las vistas.
+//
+// La configuración se toma de variables de entorno para poder desplegar en la
+// nube (Render, Railway, etc.). Si no están definidas se usan los valores
+// típicos de un entorno local (XAMPP / WAMP / Laragon).
 
-$dbHost = getenv('DB_HOST') ?: 'localhost';
-$dbPort = getenv('DB_PORT') ?: '3306';
-$dbName = getenv('DB_NAME') ?: 'TEATRO';
-$dbUser = getenv('DB_USER') ?: 'root';
-$dbPass = getenv('DB_PASS') ?: '';
+// 1) Valores de respaldo para desarrollo local.
+$dbHost = 'localhost';
+$dbPort = '3306';
+$dbName = 'TEATRO';
+$dbUser = 'root';
+$dbPass = '';
+
+// 2) Algunos proveedores entregan una sola URL de conexión, por ejemplo:
+//    mysql://usuario:clave@host:3306/TEATRO
+$dbUrl = getenv('DATABASE_URL') ?: getenv('MYSQL_URL') ?: '';
+
+if ($dbUrl !== '') {
+    $partes = parse_url($dbUrl);
+
+    if (is_array($partes)) {
+        $dbHost = $partes['host'] ?? $dbHost;
+        $dbPort = isset($partes['port']) ? (string) $partes['port'] : $dbPort;
+        $dbUser = $partes['user'] ?? $dbUser;
+        $dbPass = $partes['pass'] ?? $dbPass;
+
+        if (isset($partes['path']) && $partes['path'] !== '' && $partes['path'] !== '/') {
+            $dbName = ltrim($partes['path'], '/');
+        }
+    }
+}
+
+// 3) Las variables individuales tienen prioridad sobre la URL.
+$dbHost = getenv('DB_HOST') ?: $dbHost;
+$dbPort = getenv('DB_PORT') ?: $dbPort;
+$dbName = getenv('DB_NAME') ?: $dbName;
+$dbUser = getenv('DB_USER') ?: $dbUser;
+$dbPass = getenv('DB_PASS') ?: $dbPass;
 
 $dsn = sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4', $dbHost, $dbPort, $dbName);
 
@@ -19,7 +50,7 @@ try {
 } catch (PDOException $error) {
     error_log('Conexión PDO fallida: ' . $error->getMessage());
     http_response_code(500);
-    exit('No fue posible conectar con la base de datos. Revise la configuración de conexion.php.');
+    exit('No fue posible conectar con la base de datos. Verifique las variables de entorno DB_HOST, DB_PORT, DB_NAME, DB_USER y DB_PASS (o DATABASE_URL).');
 }
 
 function h(?string $valor): string

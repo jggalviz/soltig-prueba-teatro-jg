@@ -34,6 +34,8 @@ El script crea la base `TEATRO`, las tablas `obra` y `ventas` (InnoDB, con clave
 | `DB_USER` | `root`            |
 | `DB_PASS` | *(vacío)*         |
 
+También se puede entregar una sola URL de conexión, como las que generan varias plataformas: `DATABASE_URL` (o `MYSQL_URL`), con el formato `mysql://usuario:clave@host:3306/TEATRO`. El orden de prioridad es: variables `DB_*` (si tienen valor) → URL de conexión → valores por defecto de la tabla.
+
 Opciones para ajustarla:
 
 - Editar los valores de respaldo directamente en `conexion.php`.
@@ -95,6 +97,23 @@ SELECT cod_obra, nombre, disponibles FROM obra;
 4. Dejar el campo del comprador vacío y confirmar que se valida antes de escribir en la base.
 5. Abrir dos pestañas con la misma función y confirmar que cada compra descuenta una entrada distinta.
 
+## 6. Despliegue en Render (Docker)
+
+El repositorio incluye un `Dockerfile` basado en `php:8.2-apache` con las extensiones `pdo` y `pdo_mysql`, que copia el proyecto en `/var/www/html` y expone el puerto **80**.
+
+1. En Render: **New → Web Service** y conectar el repositorio `jggalviz/soltig-prueba-teatro-jg`.
+2. Runtime **Docker**: Render detecta el `Dockerfile` de la raíz. No hace falta comando de arranque; la imagen oficial levanta Apache en el puerto 80.
+3. Crear una base MySQL gestionada (o usar una externa) y cargar el esquema:
+
+```bash
+mysql -h <host> -P <puerto> -u <usuario> -p --default-character-set=utf8mb4 < schema.sql
+```
+
+> El parámetro `--default-character-set=utf8mb4` es obligatorio: sin él los acentos y la "ñ" se guardan corruptos.
+
+4. Definir las variables de entorno del servicio: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS` o, si el proveedor entrega una sola cadena, `DATABASE_URL`.
+5. Probar la URL pública (`/index.php`) y, si la conexión falla, revisar los logs del servicio: `conexion.php` registra el error de PDO con `error_log()` sin mostrar credenciales al usuario.
+
 ## Estructura del proyecto
 
 ```
@@ -103,6 +122,7 @@ conexion.php    Conexión PDO y utilidades de formato/escape
 index.php       Cartelera de funciones disponibles
 comprar.php     Formulario, registro de la venta y confirmación
 css/style.css   Estilos de la interfaz
+Dockerfile      Imagen php:8.2-apache para desplegar en la nube
 README.md       Este documento
 ```
 
